@@ -9,24 +9,25 @@ SET compression=9
 
 REM Read the backup folder path from the text file
 if exist "BackupDir.txt" (
-    set /p BackupDir=<BackupDir.txt
-) else (
-    goto :changeBackupDir
+  set /p BackupDir=<BackupDir.txt
+  attrib +h BackupDir.txt
+  ) else (
+  goto :changeBackupDir
 )
 
 REM Check if 7-Zip is installed, if not, install it
 if not exist "%ProgramFiles%\7-Zip\7z.exe" (
-    call :install7zip
+  call :install7zip
 )
 
 REM Script arguments (to run the backup automatically)
 if "%1"=="-auto" (
-    SET "auto=true"
-    if not exist "%BackupDir%" goto :exit
-    goto :backup
-) else (
-    SET "auto=false"
-    goto :menu
+  SET "auto=true"
+  if not exist "%BackupDir%" goto :exit
+  goto :backup
+  ) else (
+  SET "auto=false"
+  goto :menu
 )
 
 :menu
@@ -50,11 +51,12 @@ echo.
 echo Folder to be backed up
 echo.
 if not exist "Folders.txt" (
-    echo No folder to backup.
-) else (
-    for /f "delims=" %%f in (Folders.txt) do (
-        echo %%f
-    )
+  echo No folder to backup.
+  ) else (
+  for /f "delims=" %%f in (Folders.txt) do (
+    echo %%f
+  )
+  attrib +h Folders.txt
 )
 echo.
 echo ----------------------------------------------
@@ -73,7 +75,7 @@ echo 5 - Clear the list of folders to backup
 echo 6 - Quit
 echo.
 echo ----------------------------------------------
-set /p choix=Your choice: 
+set /p choix=Your choice:
 if %choix%==1 goto :backup
 if %choix%==2 goto :changeBackupDir
 if %choix%==3 goto :setCompression
@@ -87,6 +89,7 @@ cls
 color 0e
 echo Enter the paths of the folders to backup.
 echo Enter "done" to finish.
+echo Leave empty to return to the menu.
 echo.
 echo Example: C:\Users\%username%\Documents
 echo.
@@ -95,28 +98,31 @@ echo.
 echo Folders to backup:
 echo.
 if not exist "Folders.txt" (
-    echo No folder to backup.
-) else (
-    for /f "delims=" %%f in (Folders.txt) do (
-        echo %%f
-    )
+  echo No folder to backup.
+  ) else (
+  for /f "delims=" %%f in (Folders.txt) do (
+    echo %%f
+  )
 )
 echo.
 echo ----------------------------------------------
 echo.
-set /p dir=Folder path:
+set "dir="
+set /p "dir=Folder path:"
 if "%dir%"=="done" goto :menu
+if "%dir%"=="" goto :menu
 echo %dir% >> Folders.txt
-goto :addDirs
+attrib +h Folders.txt
+goto :addFolders
 
 :backup
 REM Creating necessary folders for the backup
 if exist "%BackupDir%\Backup-%username%_%BackupDate%.7z" (
-    cls
-    color 0c
-    echo A backup has already been performed today.
-    timeout /t 5
-    exit
+  cls
+  color 0c
+  echo A backup has already been performed today.
+  timeout /t 5
+  exit
 )
 if exist "%TempDir%\Backup-%username%_%BackupDate%" rmdir /S /Q "%TempDir%\Backup-%username%_%BackupDate%"
 if not exist "%TempDir%" mkdir "%TempDir%"
@@ -126,7 +132,7 @@ REM Copy files listed in Folders.txt
 cls
 color 0b
 for /f "delims=" %%f in (Folders.txt) do (
-    robocopy "%%f" "%TempDir%\Backup-%username%_%BackupDate%\%%~pnxf" /E /Z /R:0 /W:0 /MT:32 /NP
+  robocopy "%%f" "%TempDir%\Backup-%username%_%BackupDate%\%%~pnxf" /E /Z /R:0 /W:0 /MT:32 /NP
 )
 
 REM Compress the folder Backup-%username%_%BackupDate% into 7z
@@ -149,13 +155,24 @@ exit
 :changeBackupDir
 cls
 color 0e
-set /p BackupDir=Enter the backup folder path: 
+echo Enter the backup folder path without quotes,
+echo you can leave it empty to use the script folder.
+echo.
+echo Example: C:\Users\%username%\Desktop\Backup
+echo.
+echo This is where the backups will be stored.
+echo.
+set /p BackupDir=Backup folder path:
+if "%BackupDir%"=="" (
+  set "BackupDir=%~dp0"
+)
 if not exist "%BackupDir%" (
-    color 0c
-    echo The backup folder does not exist.
-    goto :changeBackupDir
+  color 0c
+  echo The backup folder does not exist.
+  goto :changeBackupDir
 )
 echo %BackupDir% > BackupDir.txt
+attrib +h BackupDir.txt
 color 0a
 goto :menu
 
@@ -175,7 +192,7 @@ echo 7 - Very high compression (mx=7)
 echo 8 - Extreme compression (mx=8)
 echo 9 - Maximum (mx=9)
 echo.
-set /p choix=Your choice: 
+set /p choix=Your choice:
 set compression=%choix%
 goto :menu
 
@@ -188,14 +205,14 @@ echo Please wait while 7-Zip is being installed...
 echo.
 winget install --id 7zip.7zip --exact --source winget --accept-source-agreements --force
 if not exist "%ProgramFiles%\7-Zip\7z.exe" (
-    cls
-    color 0c
-    echo 7-Zip installation failed.
-    echo.
-    echo Please install it manually.
-    start https://www.7-zip.org/
-    pause
-    exit
+  cls
+  color 0c
+  echo 7-Zip installation failed.
+  echo.
+  echo Please install it manually.
+  start https://www.7-zip.org/
+  pause
+  exit
 )
 goto :start
 
@@ -204,8 +221,18 @@ cls
 color 0e
 echo Clearing the list of folders to backup...
 echo.
-del Folders.txt
-echo The list of folders to backup has been cleared.
+if exist "Folders.txt" (
+  echo Folders.txt found. Attempting to delete...
+  attrib -h "Folders.txt" 2>nul
+  del "Folders.txt" 2>nul
+  if exist "Folders.txt" (
+    echo Failed to delete Folders.txt.
+    ) else (
+    echo The list of folders to backup has been cleared.
+  )
+  ) else (
+  echo No Folders.txt file found.
+)
 timeout 3
 goto :menu
 
