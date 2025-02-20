@@ -10,6 +10,7 @@ SET compression=9
 REM Read the backup folder path from the text file
 if exist "BackupDir.txt" (
     set /p BackupDir=<BackupDir.txt
+    attrib +h BackupDir.txt
 ) else (
     goto :changeBackupDir
 )
@@ -55,6 +56,7 @@ if not exist "Folders.txt" (
     for /f "delims=" %%f in (Folders.txt) do (
         echo %%f
     )
+    attrib +h Folders.txt
 )
 echo.
 echo ----------------------------------------------
@@ -87,6 +89,7 @@ cls
 color 0e
 echo Enter the paths of the folders to backup.
 echo Enter "done" to finish.
+echo Leave empty to return to the menu.
 echo.
 echo Example: C:\Users\%username%\Documents
 echo.
@@ -104,10 +107,13 @@ if not exist "Folders.txt" (
 echo.
 echo ----------------------------------------------
 echo.
-set /p dir=Folder path:
+set "dir="
+set /p "dir=Folder path:"
 if "%dir%"=="done" goto :menu
+if "%dir%"=="" goto :menu
 echo %dir% >> Folders.txt
-goto :addDirs
+attrib +h Folders.txt
+goto :addFolders
 
 :backup
 REM Creating necessary folders for the backup
@@ -149,13 +155,25 @@ exit
 :changeBackupDir
 cls
 color 0e
-set /p BackupDir=Enter the backup folder path: 
+echo Enter the backup folder path without quotes,
+echo you can leave it empty to use the script folder.
+echo.
+echo Example: C:\Users\%username%\Desktop\Backup
+echo.
+echo This is where the backups will be stored.
+echo.
+set /p BackupDir=Backup folder path: 
+if "%BackupDir%"==""
+(
+    set "BackupDir=%~dp0"
+)
 if not exist "%BackupDir%" (
     color 0c
     echo The backup folder does not exist.
     goto :changeBackupDir
 )
 echo %BackupDir% > BackupDir.txt
+attrib +h BackupDir.txt
 color 0a
 goto :menu
 
