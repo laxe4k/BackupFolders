@@ -173,4 +173,13 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# Config files
+backup_config.json
+
+# svg files
+*.svg
+
+# convert icon
+convert_icons.py
+
 # End of https://www.toptal.com/developers/gitignore/api/python

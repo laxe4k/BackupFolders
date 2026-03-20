@@ -11,7 +11,7 @@ echo.
 echo Building executable...
 echo.
 
-python -m PyInstaller --onefile --windowed --name BackupFolders --clean BackupFolders.py
+python -m PyInstaller --onefile --windowed --name BackupFolders --clean --icon=assets/icons/icon.ico --add-data "assets;assets" --add-data "assets/icons/icon.ico;." BackupFolders.py
 
 echo.
 echo ======================================
