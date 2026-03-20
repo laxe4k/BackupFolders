@@ -2,7 +2,7 @@
 
 Outil de sauvegarde Windows avec interface graphique. Compresse vos dossiers en archive `.7z` via 7-Zip.
 
-![GitHub Release](https://img.shields.io/github/v/release/laxe4k/BackupFolders)
+[![GitHub Release](https://img.shields.io/github/v/release/laxe4k/BackupFolders)](https://github.com/laxe4k/BackupFolders/releases/latest)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 [![GitHub License](https://img.shields.io/github/license/laxe4k/BackupFolders)](LICENSE)
