@@ -4,15 +4,16 @@ Backs up selected folders into a 7z archive using 7-Zip.
 """
 
 import os
+import re
 import sys
 import json
+import stat
 import shutil
 import subprocess
 import threading
 import datetime
 import getpass
 import ctypes
-from pathlib import Path
 from tkinter import (
     Tk,
     Frame,
@@ -21,7 +22,6 @@ from tkinter import (
     Listbox,
     Scrollbar,
     StringVar,
-    IntVar,
     PhotoImage,
     Text,
     filedialog,
@@ -32,21 +32,14 @@ from tkinter import (
     RIGHT,
     Y,
     X,
-    TOP,
-    BOTTOM,
-    HORIZONTAL,
     W,
-    E,
-    N,
-    S,
     DISABLED,
     NORMAL,
-    Canvas,
 )
-from tkinter.ttk import Style, Combobox, Progressbar, LabelFrame, Separator
+from tkinter.ttk import Style, Combobox, Progressbar, Separator
 
 APP_NAME = "BackupFolders"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 CONFIG_FILE = "backup_config.json"
 SEVEN_ZIP_PATH = os.path.join(
     os.environ.get("ProgramFiles", "C:\\Program Files"), "7-Zip", "7z.exe"
@@ -90,7 +83,6 @@ def _copy_ignore_missing(src: str, dst: str):
 
 def _force_rmtree(path: str):
     """Remove a directory tree, forcing removal of read-only files (e.g. .git objects)."""
-    import stat
 
     def _on_error(_func, _path, _exc_info):
         try:
@@ -121,6 +113,131 @@ def _get_asset_path(relative_path: str) -> str:
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
+
+
+def _run_backup_core(
+    folders: list[str],
+    temp_dir: str,
+    dest_path: str,
+    compression: int,
+    on_status=None,
+    on_progress=None,
+    on_log=None,
+):
+    """Core backup logic shared between GUI and auto modes.
+
+    Returns (success: bool, error_msg: str | None).
+    Callbacks are optional (used by GUI, ignored in auto mode).
+    """
+
+    def _status(s):
+        if on_status:
+            on_status(s)
+
+    def _progress(v):
+        if on_progress:
+            on_progress(v)
+
+    def _log(s):
+        if on_log:
+            on_log(s)
+
+    _log("Préparation du dossier temporaire…")
+    if os.path.exists(temp_dir):
+        _force_rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    valid_folders = [f for f in folders if os.path.isdir(f)]
+    total_folders = len(valid_folders)
+    if total_folders == 0:
+        _status("Aucun dossier valide à sauvegarder.")
+        _log("Aucun dossier valide trouvé dans la configuration. Abandon du backup.")
+        try:
+            _force_rmtree(temp_dir)
+        except Exception:
+            pass
+        return False, (
+            "Aucun des dossiers configurés n'existe ou n'est accessible.\n"
+            "Vérifiez la configuration de vos dossiers avant de relancer le backup."
+        )
+
+    # Copy folders
+    _status("Copie des fichiers…")
+    for i, folder in enumerate(valid_folders):
+        folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[0].replace(
+            ":", ""
+        )
+        dest_sub = os.path.join(temp_dir, folder_name)
+        _status(f"Copie de {folder_name}… ({i + 1}/{total_folders})")
+        _log(f"  Copie : {folder}")
+        shutil.copytree(
+            folder,
+            dest_sub,
+            dirs_exist_ok=True,
+            ignore_dangling_symlinks=True,
+            copy_function=_copy_ignore_missing,
+            ignore=_ignore_git_dirs,
+        )
+        _progress(60 * (i + 1) / total_folders)
+
+    # Compress
+    _status("Compression en cours…")
+    _log(f"  Compression (niveau {compression})…")
+    archive_tmp = temp_dir + ".7z"
+    proc = subprocess.Popen(
+        [
+            SEVEN_ZIP_PATH,
+            "a",
+            "-t7z",
+            archive_tmp,
+            "-r",
+            temp_dir,
+            f"-mx={compression}",
+            "-bsp1",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    buf = b""
+    last_pct = -1
+    while True:
+        byte = proc.stdout.read(1)
+        if not byte:
+            break
+        if byte in (b"\r", b"\n"):
+            m = re.search(rb"(\d+)%", buf)
+            if m:
+                pct = int(m.group(1))
+                if pct != last_pct:
+                    last_pct = pct
+                    _progress(60 + 35 * pct / 100)
+            buf = b""
+        else:
+            buf += byte
+    proc.wait()
+    stderr_out = proc.stderr.read().decode("utf-8", errors="replace")
+    if proc.returncode != 0:
+        _log(f"  ERREUR 7-Zip : {stderr_out}")
+        return False, f"Erreur lors de la compression :\n{stderr_out}"
+    _progress(95)
+    _log("  Compression terminée.")
+
+    # Move archive
+    _status("Déplacement de l'archive…")
+    _log(f"  Déplacement vers {dest_path}")
+    shutil.move(archive_tmp, dest_path)
+    _progress(100)
+
+    try:
+        size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+        _log(f"  Archive : {size_mb:.1f} Mo")
+    except OSError:
+        pass
+
+    _status("✅ Backup terminé avec succès !")
+    _log("✅ Backup terminé avec succès !")
+    return True, None
 
 
 class BackupApp:
@@ -644,7 +761,7 @@ class BackupApp:
             # Install 7-Zip if missing
             if not os.path.isfile(SEVEN_ZIP_PATH):
                 self._set_status("Installation de 7-Zip…")
-                ret = subprocess.run(
+                subprocess.run(
                     [
                         "winget",
                         "install",
@@ -665,96 +782,24 @@ class BackupApp:
                     )
                     return
 
-            # Copy folders
-            self._set_status("Copie des fichiers…")
-            self._log("Préparation du dossier temporaire…")
-            if os.path.exists(temp_dir):
-                _force_rmtree(temp_dir)
-            os.makedirs(temp_dir, exist_ok=True)
-
-            valid_folders = [f for f in self.folders if os.path.isdir(f)]
-            total_folders = len(valid_folders)
-            if total_folders == 0:
-                self._set_status("Aucun dossier valide à sauvegarder.")
-                self._log(
-                    "Aucun dossier valide trouvé dans la configuration. Abandon du backup."
-                )
-                try:
-                    _force_rmtree(temp_dir)
-                except Exception:
-                    pass
-                self._show_error(
-                    "Aucun des dossiers configurés n'existe ou n'est accessible.\n"
-                    "Vérifiez la configuration de vos dossiers avant de relancer le backup."
-                )
-                return
-            for i, folder in enumerate(valid_folders):
-                folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[
-                    0
-                ].replace(":", "")
-                dest_sub = os.path.join(temp_dir, folder_name)
-                self._set_status(f"Copie de {folder_name}… ({i + 1}/{total_folders})")
-                self._log(f"  Copie : {folder}")
-                shutil.copytree(
-                    folder,
-                    dest_sub,
-                    dirs_exist_ok=True,
-                    ignore_dangling_symlinks=True,
-                    copy_function=_copy_ignore_missing,
-                    ignore=_ignore_git_dirs,
-                )
-                self._update_progress(
-                    70 * (i + 1) / total_folders if total_folders else 70
-                )
-
-            # Compress
             compression = COMPRESSION_LEVELS.get(self.compression_label.get(), 5)
-            self._set_status("Compression en cours…")
-            self._log(f"  Compression (niveau {compression})…")
-            self._update_progress(80)
-            archive_tmp = temp_dir + ".7z"
-            result = subprocess.run(
-                [
-                    SEVEN_ZIP_PATH,
-                    "a",
-                    "-t7z",
-                    archive_tmp,
-                    "-r",
-                    temp_dir,
-                    f"-mx={compression}",
-                ],
-                capture_output=True,
-                text=True,
+            success, error = _run_backup_core(
+                self.folders,
+                temp_dir,
+                dest_path,
+                compression,
+                on_status=self._set_status,
+                on_progress=self._update_progress,
+                on_log=self._log,
             )
-            self._update_progress(90)
-            if result.returncode != 0:
-                self._log(f"  ERREUR 7-Zip : {result.stderr or result.stdout}")
-                self._show_error(
-                    f"Erreur lors de la compression :\n{result.stderr or result.stdout}"
-                )
-                return
-            self._log("  Compression terminée.")
-
-            # Move archive to destination
-            self._set_status("Déplacement de l'archive…")
-            self._log(f"  Déplacement vers {dest_path}")
-            shutil.move(archive_tmp, dest_path)
-            self._update_progress(100)
-
-            try:
-                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-                self._log(f"  Archive : {size_mb:.1f} Mo")
-            except OSError:
-                pass
-
-            self._set_status("✅ Backup terminé avec succès !")
-            self._log("✅ Backup terminé avec succès !")
-            self._show_info(f"Backup terminé !\n\n{dest_path}")
+            if not success:
+                self._show_error(error or "Erreur inconnue.")
+            else:
+                self._show_info(f"Backup terminé !\n\n{dest_path}")
 
         except Exception as exc:
             self._show_error(f"Erreur inattendue :\n{exc}")
         finally:
-            # Cleanup
             if os.path.exists(temp_dir):
                 try:
                     _force_rmtree(temp_dir)
@@ -817,40 +862,18 @@ def run_auto():
         os.environ.get("TEMP", ""), ".Backup", f"Backup-{username}_{today}"
     )
     try:
-        if os.path.exists(temp_dir):
-            _force_rmtree(temp_dir)
-        os.makedirs(temp_dir, exist_ok=True)
-
-        for folder in folders:
-            if not os.path.isdir(folder):
-                continue
-            folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[
-                0
-            ].replace(":", "")
-            shutil.copytree(
-                folder,
-                os.path.join(temp_dir, folder_name),
-                dirs_exist_ok=True,
-                ignore_dangling_symlinks=True,
-                copy_function=_copy_ignore_missing,
-                ignore=_ignore_git_dirs,
-            )
-
-        archive_tmp = temp_dir + ".7z"
-        subprocess.run(
-            [
-                SEVEN_ZIP_PATH,
-                "a",
-                "-t7z",
-                archive_tmp,
-                "-r",
-                temp_dir,
-                f"-mx={compression}",
-            ],
-            check=True,
+        success, error = _run_backup_core(
+            folders,
+            temp_dir,
+            dest_path,
+            compression,
+            on_status=lambda s: print(s),
         )
-        shutil.move(archive_tmp, dest_path)
-        print(f"Backup terminé : {dest_path}")
+        if success:
+            print(f"Backup terminé : {dest_path}")
+        else:
+            print(f"Erreur : {error}")
+            sys.exit(1)
     finally:
         if os.path.exists(temp_dir):
             try:
