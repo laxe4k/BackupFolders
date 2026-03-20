@@ -674,6 +674,20 @@ class BackupApp:
 
             valid_folders = [f for f in self.folders if os.path.isdir(f)]
             total_folders = len(valid_folders)
+            if total_folders == 0:
+                self._set_status("Aucun dossier valide à sauvegarder.")
+                self._log(
+                    "Aucun dossier valide trouvé dans la configuration. Abandon du backup."
+                )
+                try:
+                    _force_rmtree(temp_dir)
+                except Exception:
+                    pass
+                self._show_error(
+                    "Aucun des dossiers configurés n'existe ou n'est accessible.\n"
+                    "Vérifiez la configuration de vos dossiers avant de relancer le backup."
+                )
+                return
             for i, folder in enumerate(valid_folders):
                 folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[
                     0
@@ -697,6 +711,7 @@ class BackupApp:
             compression = COMPRESSION_LEVELS.get(self.compression_label.get(), 5)
             self._set_status("Compression en cours…")
             self._log(f"  Compression (niveau {compression})…")
+            self._update_progress(80)
             archive_tmp = temp_dir + ".7z"
             result = subprocess.run(
                 [
