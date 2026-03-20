@@ -1,55 +1,65 @@
-# Backup Script - by Laxe4k
+# BackupFolders
 
-## Description
-This batch script allows you to back up specified folders by compressing them into a 7z file. It also checks if 7-Zip is installed and installs it if necessary.
+Outil de sauvegarde Windows avec interface graphique. Compresse vos dossiers en archive `.7z` via 7-Zip.
 
-## Features
-- Creates a compressed backup file using 7-Zip.
-- Allows you to specify the backup folder and folders to be backed up.
-- Provides options to change the backup folder, compression level, and add folders to be backed up.
-- Checks and installs 7-Zip if necessary.
+![GitHub Release](https://img.shields.io/github/v/release/laxe4k/BackupFolders)
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+[![GitHub License](https://img.shields.io/github/license/laxe4k/BackupFolders)](LICENSE)
 
-## Script Steps
+## Fonctionnalités
 
-1. **Initialization**:
-   - Configures encoding to UTF-8 and sets necessary variables for the backup.
+- **Interface graphique** — sélection des dossiers et du niveau de compression sans ligne de commande
+- **Compression 7z** — niveaux de 0 (stockage) à 9 (maximum)
+- **Configuration persistante** — sauvegardée automatiquement dans `backup_config.json`
+- **Installation automatique de 7-Zip** via winget si absent
+- **Mode automatique** (`-auto`) — pour le Planificateur de tâches Windows
+- **Exécutable standalone** — compilable en `.exe` sans dépendance Python
 
-2. **Preparing the Backup Folder**:
-   - Reads the backup folder path from a text file (BackupDir.txt) or prompts the user to specify it.
+## Installation
 
-3. **Checking for 7-Zip**:
-   - Verifies if 7-Zip is installed and installs it via winget if necessary.
+### Depuis les sources
 
-4. **Main Menu**:
-   - Displays a menu with options to perform a backup, change the backup folder, change the compression level, add folders to be backed up, clear folders, and exit.
+```bash
+git clone https://github.com/laxe4k/BackupFolders.git
+cd BackupFolders
+python BackupFolders.py
+```
 
-5. **Adding Folders**:
-   - Allows the user to add folder paths to be backed up into a text file (Folders.txt).
+### Exécutable Windows
 
-6. **Backup**:
-   - Creates necessary folders for temporary backup.
-   - Copies files from specified folders into the temporary backup folder.
-   - Compresses the temporary backup folder into a 7z file with the specified compression level.
-   - Moves the 7z file to the backup folder.
+```bash
+pip install pyinstaller
+python -m PyInstaller --onefile --windowed --name BackupFolders --clean BackupFolders.py
+```
 
-7. **Changing the Backup Folder**:
-   - Allows the user to specify a new path for the backup folder.
+Ou lancer `build.bat`. L'exécutable sera dans `dist\BackupFolders.exe`.
 
-8. **Clearing Folders**:
-   - Clears the list of folders to be backed up.
+## Utilisation
 
-9. **Changing the Compression Level**:
-   - Allows the user to choose the compression level for 7-Zip.
+### Interface graphique
 
-## Usage
+1. Lancer `BackupFolders.py` ou `BackupFolders.exe`
+2. Définir le **dossier de destination** des backups
+3. **Ajouter** les dossiers à sauvegarder
+4. Choisir le **niveau de compression**
+5. Cliquer sur **Lancer le backup**
 
-1. **Running the Script**:
-   - Double-click the batch file to run the script.
-   - Follow the on-screen instructions to configure and perform the backup.
+L'archive générée sera nommée `Backup-<utilisateur>_<date>.7z`.
 
-2. **Command Line Options**:
-   - Use the `-auto` argument to run the backup automatically without displaying the menu.
+### Mode automatique
 
-## Notes
-- Ensure that 7-Zip is installed or that winget is available for automatic installation.
-- The paths of the folders to be backed up should be specified in the `Folders.txt` file.
+```bash
+BackupFolders.exe -auto
+```
+
+Lance le backup silencieusement avec la configuration sauvegardée. Utile pour le Planificateur de tâches Windows.
+
+### Version batch (legacy)
+
+L'ancien script `BackupFolders.bat` reste disponible pour les systèmes sans Python.
+
+## Prérequis
+
+- **Python 3.10+** (pour exécuter depuis les sources)
+- **7-Zip** (installé automatiquement si absent)
