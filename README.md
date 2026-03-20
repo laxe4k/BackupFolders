@@ -18,6 +18,10 @@ Outil de sauvegarde Windows avec interface graphique. Compresse vos dossiers en 
 
 ## Installation
 
+### Exécutable Windows (recommandé)
+
+Télécharger `BackupFolders.exe` depuis la [dernière release](https://github.com/laxe4k/BackupFolders/releases/latest).
+
 ### Depuis les sources
 
 ```bash
@@ -25,15 +29,6 @@ git clone https://github.com/laxe4k/BackupFolders.git
 cd BackupFolders
 python BackupFolders.py
 ```
-
-### Exécutable Windows
-
-```bash
-pip install pyinstaller
-python -m PyInstaller --onefile --windowed --name BackupFolders --clean BackupFolders.py
-```
-
-Ou lancer `build.bat`. L'exécutable sera dans `dist\BackupFolders.exe`.
 
 ## Utilisation
 
@@ -54,10 +49,6 @@ BackupFolders.exe -auto
 ```
 
 Lance le backup silencieusement avec la configuration sauvegardée. Utile pour le Planificateur de tâches Windows.
-
-### Version batch (legacy)
-
-L'ancien script `BackupFolders.bat` reste disponible pour les systèmes sans Python.
 
 ## Prérequis
 
