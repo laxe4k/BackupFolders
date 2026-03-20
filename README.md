@@ -9,12 +9,12 @@ Outil de sauvegarde Windows avec interface graphique. Compresse vos dossiers en 
 
 ## Fonctionnalités
 
-- **Interface graphique** — sélection des dossiers et du niveau de compression sans ligne de commande
-- **Compression 7z** — niveaux de 0 (stockage) à 9 (maximum)
-- **Configuration persistante** — sauvegardée automatiquement dans `backup_config.json`
+- **Interface graphique** - sélection des dossiers et du niveau de compression sans ligne de commande
+- **Compression 7z** - niveaux de 0 (stockage) à 9 (maximum)
+- **Configuration persistante** - sauvegardée automatiquement dans `backup_config.json`
 - **Installation automatique de 7-Zip** via winget si absent
-- **Mode automatique** (`-auto`) — pour le Planificateur de tâches Windows
-- **Exécutable standalone** — compilable en `.exe` sans dépendance Python
+- **Mode automatique** (`-auto`) - pour le Planificateur de tâches Windows
+- **Exécutable standalone** - compilable en `.exe` sans dépendance Python
 
 ## Installation
 
