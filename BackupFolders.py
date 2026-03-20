@@ -46,7 +46,7 @@ from tkinter import (
 from tkinter.ttk import Style, Combobox, Progressbar, LabelFrame, Separator
 
 APP_NAME = "BackupFolders"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 CONFIG_FILE = "backup_config.json"
 SEVEN_ZIP_PATH = os.path.join(
     os.environ.get("ProgramFiles", "C:\\Program Files"), "7-Zip", "7z.exe"
