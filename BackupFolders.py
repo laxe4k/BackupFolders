@@ -23,6 +23,7 @@ from tkinter import (
     StringVar,
     IntVar,
     PhotoImage,
+    Text,
     filedialog,
     messagebox,
     END,
@@ -444,19 +445,71 @@ class BackupApp:
         Separator(pad).pack(fill=X, pady=(6, 4))
         sf = Frame(pad, bg=BG)
         sf.pack(fill=X)
+        status_row = Frame(sf, bg=BG)
+        status_row.pack(fill=X)
         self.status_var = StringVar(value="Prêt.")
         Label(
-            sf,
+            status_row,
             textvariable=self.status_var,
             anchor=W,
             bg=BG,
             fg=FG_DIM,
             font=("Segoe UI", 8),
-        ).pack(fill=X)
+        ).pack(side=LEFT, fill=X, expand=True)
+        self._details_visible = False
+        self.btn_details = Button(
+            status_row,
+            text="Détails ▸",
+            command=self._toggle_details,
+            bg=BG,
+            fg=FG_DIM,
+            activebackground=BG_HOVER,
+            activeforeground=FG,
+            relief="flat",
+            bd=0,
+            padx=6,
+            pady=0,
+            cursor="hand2",
+            font=("Segoe UI", 8),
+        )
+        self.btn_details.pack(side=RIGHT)
+        self.btn_details.bind(
+            "<Enter>", lambda e: self.btn_details.config(fg=FG_ACCENT)
+        )
+        self.btn_details.bind("<Leave>", lambda e: self.btn_details.config(fg=FG_DIM))
         self.progress = Progressbar(
-            sf, mode="indeterminate", style="green.Horizontal.TProgressbar"
+            sf,
+            mode="determinate",
+            style="green.Horizontal.TProgressbar",
+            maximum=100,
         )
         self.progress.pack(fill=X, pady=(2, 0))
+        # ── Details log panel (hidden by default) ──
+        self.details_frame = Frame(
+            pad, bg=BG_CARD, highlightbackground=BORDER, highlightthickness=1
+        )
+        self.log_text = Text(
+            self.details_frame,
+            bg=BG_INPUT,
+            fg=FG_DIM,
+            font=("Consolas", 8),
+            bd=0,
+            highlightthickness=0,
+            wrap="word",
+            height=8,
+            state=DISABLED,
+            cursor="arrow",
+        )
+        log_sb = Scrollbar(
+            self.details_frame,
+            command=self.log_text.yview,
+            bg=BG_INPUT,
+            troughcolor=BG_CARD,
+            width=8,
+        )
+        self.log_text.config(yscrollcommand=log_sb.set)
+        log_sb.pack(side=RIGHT, fill=Y)
+        self.log_text.pack(fill=BOTH, expand=True, padx=1, pady=1)
 
     def _refresh_listbox(self):
         self.listbox.delete(0, END)
@@ -464,6 +517,27 @@ class BackupApp:
             self.listbox.insert(END, f)
         n = len(self.folders)
         self.lbl_count.config(text=f"{n} dossier{'s' if n != 1 else ''}")
+
+    def _toggle_details(self):
+        if self._details_visible:
+            self.details_frame.pack_forget()
+            self.btn_details.config(text="Détails ▸")
+        else:
+            self.details_frame.pack(fill=BOTH, expand=False, pady=(4, 0))
+            self.btn_details.config(text="Détails ▾")
+        self._details_visible = not self._details_visible
+
+    def _log(self, text: str):
+        def _append():
+            self.log_text.config(state=NORMAL)
+            self.log_text.insert(END, text + "\n")
+            self.log_text.see(END)
+            self.log_text.config(state=DISABLED)
+
+        self.root.after(0, _append)
+
+    def _update_progress(self, value: float):
+        self.root.after(0, lambda: self.progress.config(value=min(value, 100)))
 
     # ─── Actions ────────────────────────────────────────────────────────
 
@@ -546,7 +620,12 @@ class BackupApp:
         self._save_config()
         self.is_running = True
         self.btn_backup.config(state=DISABLED, bg=BG_HOVER)
-        self.progress.start(15)
+        self.progress.config(value=0)
+        # Clear log
+        self.log_text.config(state=NORMAL)
+        self.log_text.delete("1.0", END)
+        self.log_text.config(state=DISABLED)
+        self._log(f"Démarrage du backup — {dest_path}")
 
         threading.Thread(
             target=self._run_backup, args=(dest_path, today, username), daemon=True
@@ -588,18 +667,20 @@ class BackupApp:
 
             # Copy folders
             self._set_status("Copie des fichiers…")
+            self._log("Préparation du dossier temporaire…")
             if os.path.exists(temp_dir):
                 _force_rmtree(temp_dir)
             os.makedirs(temp_dir, exist_ok=True)
 
-            for folder in self.folders:
-                if not os.path.isdir(folder):
-                    continue
+            valid_folders = [f for f in self.folders if os.path.isdir(f)]
+            total_folders = len(valid_folders)
+            for i, folder in enumerate(valid_folders):
                 folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[
                     0
                 ].replace(":", "")
                 dest_sub = os.path.join(temp_dir, folder_name)
-                self._set_status(f"Copie de {folder_name}…")
+                self._set_status(f"Copie de {folder_name}… ({i + 1}/{total_folders})")
+                self._log(f"  Copie : {folder}")
                 shutil.copytree(
                     folder,
                     dest_sub,
@@ -608,10 +689,14 @@ class BackupApp:
                     copy_function=_copy_ignore_missing,
                     ignore=_ignore_git_dirs,
                 )
+                self._update_progress(
+                    70 * (i + 1) / total_folders if total_folders else 70
+                )
 
             # Compress
             compression = COMPRESSION_LEVELS.get(self.compression_label.get(), 5)
             self._set_status("Compression en cours…")
+            self._log(f"  Compression (niveau {compression})…")
             archive_tmp = temp_dir + ".7z"
             result = subprocess.run(
                 [
@@ -626,17 +711,29 @@ class BackupApp:
                 capture_output=True,
                 text=True,
             )
+            self._update_progress(90)
             if result.returncode != 0:
+                self._log(f"  ERREUR 7-Zip : {result.stderr or result.stdout}")
                 self._show_error(
                     f"Erreur lors de la compression :\n{result.stderr or result.stdout}"
                 )
                 return
+            self._log("  Compression terminée.")
 
             # Move archive to destination
             self._set_status("Déplacement de l'archive…")
+            self._log(f"  Déplacement vers {dest_path}")
             shutil.move(archive_tmp, dest_path)
+            self._update_progress(100)
+
+            try:
+                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+                self._log(f"  Archive : {size_mb:.1f} Mo")
+            except OSError:
+                pass
 
             self._set_status("✅ Backup terminé avec succès !")
+            self._log("✅ Backup terminé avec succès !")
             self._show_info(f"Backup terminé !\n\n{dest_path}")
 
         except Exception as exc:
@@ -653,7 +750,6 @@ class BackupApp:
     def _finish_backup(self):
         self.is_running = False
         self.btn_backup.config(state=NORMAL, bg=BTN_OK)
-        self.progress.stop()
 
     # ─── Thread-safe UI helpers ─────────────────────────────────────────
 
