@@ -1,6 +1,6 @@
 """
 BackupFolders - GUI Backup Tool by Laxe4k
-Backs up selected folders into a 7z archive using 7-Zip.
+Backs up selected folders into a 7z archive using NanaZip.
 """
 
 import os
@@ -39,19 +39,20 @@ from tkinter import (
 from tkinter.ttk import Style, Combobox, Progressbar, Separator
 
 APP_NAME = "BackupFolders"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.1.0"
 CONFIG_FILE = "backup_config.json"
-SEVEN_ZIP_PATH = os.path.join(
-    os.environ.get("ProgramFiles", "C:\\Program Files"), "7-Zip", "7z.exe"
+NANAZIP_PATH = shutil.which("NanaZipC") or os.path.join(
+    os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "NanaZipC.exe"
 )
 
 COMPRESSION_LEVELS = {
-    "0 - Aucune compression (stockage)": 0,
-    "1 - Très faible": 1,
-    "3 - Faible": 3,
-    "5 - Normal": 5,
-    "7 - Élevé": 7,
-    "9 - Maximum": 9,
+    "0 - Aucune": 0,
+    "1 - Le plus rapide": 1,
+    "3 - Rapide": 3,
+    "5 - Normale": 5,
+    "7 - Maximum": 7,
+    "9 - Ultra": 9,
+    "Ultra - Highest (Ultimate)": -1,
 }
 
 # ─── Theme colors ───────────────────────────────────────────────────
@@ -184,17 +185,19 @@ def _run_backup_core(
     _status("Compression en cours…")
     _log(f"  Compression (niveau {compression})…")
     archive_tmp = temp_dir + ".7z"
+    use_mmax = compression == -1
+    cmd = [
+        NANAZIP_PATH,
+        "a",
+        "-t7z",
+        archive_tmp,
+        "-r",
+        temp_dir,
+        "-mmax" if use_mmax else f"-mx={compression}",
+        "-bsp1",
+    ]
     proc = subprocess.Popen(
-        [
-            SEVEN_ZIP_PATH,
-            "a",
-            "-t7z",
-            archive_tmp,
-            "-r",
-            temp_dir,
-            f"-mx={compression}",
-            "-bsp1",
-        ],
+        cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -218,7 +221,7 @@ def _run_backup_core(
     proc.wait()
     stderr_out = proc.stderr.read().decode("utf-8", errors="replace")
     if proc.returncode != 0:
-        _log(f"  ERREUR 7-Zip : {stderr_out}")
+        _log(f"  ERREUR NanaZip : {stderr_out}")
         return False, f"Erreur lors de la compression :\n{stderr_out}"
     _progress(95)
     _log("  Compression terminée.")
@@ -255,7 +258,7 @@ class BackupApp:
         # State
         self.backup_dir = StringVar(value="")
         self.folders: list[str] = []
-        self.compression_label = StringVar(value="5 - Normal")
+        self.compression_label = StringVar(value="5 - Normale")
         self.is_running = False
         self._img_refs: list[PhotoImage] = []
 
@@ -263,7 +266,7 @@ class BackupApp:
         self._load_icons()
         self._load_config()
         self._build_ui()
-        self._check_7zip()
+        self._check_nanazip()
 
     def _setup_theme(self):
         style = Style()
@@ -336,7 +339,7 @@ class BackupApp:
                     data = json.load(f)
                 self.backup_dir.set(data.get("backup_dir", ""))
                 self.folders = data.get("folders", [])
-                self.compression_label.set(data.get("compression", "5 - Normal"))
+                self.compression_label.set(data.get("compression", "5 - Normale"))
             except (json.JSONDecodeError, OSError):
                 pass
         # Migration: import from old .bat config files
@@ -697,10 +700,10 @@ class BackupApp:
         if path and os.path.isdir(path):
             os.startfile(path)
 
-    def _check_7zip(self):
-        if not os.path.isfile(SEVEN_ZIP_PATH):
+    def _check_nanazip(self):
+        if not NANAZIP_PATH or not os.path.isfile(NANAZIP_PATH):
             self.status_var.set(
-                "⚠ 7-Zip non détecté. Il sera installé au premier backup."
+                "⚠ NanaZip non détecté. Il sera installé au premier backup."
             )
 
     # ─── Backup logic ───────────────────────────────────────────────────
@@ -758,15 +761,16 @@ class BackupApp:
             f"Backup-{username}_{today}",
         )
         try:
-            # Install 7-Zip if missing
-            if not os.path.isfile(SEVEN_ZIP_PATH):
-                self._set_status("Installation de 7-Zip…")
+            # Install NanaZip if missing
+            global NANAZIP_PATH
+            if not NANAZIP_PATH or not os.path.isfile(NANAZIP_PATH):
+                self._set_status("Installation de NanaZip…")
                 subprocess.run(
                     [
                         "winget",
                         "install",
                         "--id",
-                        "7zip.7zip",
+                        "M2Team.NanaZip",
                         "--exact",
                         "--source",
                         "winget",
@@ -776,9 +780,12 @@ class BackupApp:
                     capture_output=True,
                     text=True,
                 )
-                if not os.path.isfile(SEVEN_ZIP_PATH):
+                NANAZIP_PATH = shutil.which("NanaZipC") or os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "NanaZipC.exe"
+                )
+                if not NANAZIP_PATH or not os.path.isfile(NANAZIP_PATH):
                     self._show_error(
-                        "7-Zip n'a pas pu être installé.\nInstallez-le manuellement depuis https://www.7-zip.org/"
+                        "NanaZip n'a pas pu être installé.\nInstallez-le manuellement depuis le Microsoft Store."
                     )
                     return
 
@@ -835,7 +842,7 @@ def run_auto():
 
     backup_dir = data.get("backup_dir", "")
     folders = data.get("folders", [])
-    compression_label = data.get("compression", "5 - Normal")
+    compression_label = data.get("compression", "5 - Normale")
     compression = COMPRESSION_LEVELS.get(compression_label, 5)
 
     if not backup_dir or not os.path.isdir(backup_dir):
@@ -854,8 +861,8 @@ def run_auto():
         print("Un backup a déjà été effectué aujourd'hui.")
         sys.exit(0)
 
-    if not os.path.isfile(SEVEN_ZIP_PATH):
-        print("7-Zip non installé.")
+    if not NANAZIP_PATH or not os.path.isfile(NANAZIP_PATH):
+        print("NanaZip non installé.")
         sys.exit(1)
 
     temp_dir = os.path.join(
