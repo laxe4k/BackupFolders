@@ -39,7 +39,7 @@ from tkinter import (
 from tkinter.ttk import Style, Combobox, Progressbar, Separator
 
 APP_NAME = "BackupFolders"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 CONFIG_FILE = "backup_config.json"
 NANAZIP_PATH = shutil.which("NanaZipC") or os.path.join(
     os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "NanaZipC.exe"
