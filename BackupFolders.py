@@ -165,11 +165,10 @@ def _run_backup_core(
     # Copy folders
     _status("Copie des fichiers…")
     for i, folder in enumerate(valid_folders):
-        folder_name = os.path.basename(folder) or os.path.splitdrive(folder)[0].replace(
-            ":", ""
-        )
-        dest_sub = os.path.join(temp_dir, folder_name)
-        _status(f"Copie de {folder_name}… ({i + 1}/{total_folders})")
+        drive, tail = os.path.splitdrive(folder)
+        drive_letter = drive.replace(":", "")
+        dest_sub = os.path.join(temp_dir, drive_letter, tail.lstrip(os.sep))
+        _status(f"Copie de {os.path.basename(folder)}… ({i + 1}/{total_folders})")
         _log(f"  Copie : {folder}")
         shutil.copytree(
             folder,
