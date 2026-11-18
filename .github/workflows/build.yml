@@ -21,7 +21,7 @@ jobs:
           - { name: macos-intel,  os: macos-latest,     target: x86_64-apple-darwin,       bin: backupfolders }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,13 +46,13 @@ jobs:
             tar czf ../../../backupfolders-${{ matrix.name }}.tar.gz ${{ matrix.bin }}
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: backupfolders-${{ matrix.name }}
           path: backupfolders-${{ matrix.name }}.*
 
       - name: Publier dans les Releases
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.4
         with:
           files: backupfolders-${{ matrix.name }}.*
