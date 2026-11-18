@@ -1,7 +1,7 @@
-//! Backup Folders — port Rust / egui (eframe 0.29).
-//! Interface graphique Windows (egui, zéro dépendance système) + mode console (-auto).
+//! BackupFolders — port Rust / egui (eframe 0.29).
+//! Interface graphique multiplateforme (egui, zéro dépendance système) + mode console (-auto).
 //! Logique de backup identique à l'original Python : copie des dossiers (.git ignoré),
-//! compression 7z via NanaZip, config persistante en JSON, progression et logs.
+//! compression 7z via 7-Zip/NanaZip, config persistante en JSON, progression et logs.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -15,7 +15,7 @@ use std::thread;
 use walkdir::WalkDir;
 
 const APP_NAME: &str = "Backup Folders";
-const APP_VERSION: &str = "3.0.0";
+const APP_VERSION: &str = "3.1.0";
 const CONFIG_FILE: &str = "backup_config.json";
 const DEFAULT_COMPRESSION: &str = "5 - Normale";
 
@@ -44,7 +44,6 @@ const COMPRESSION_LEVELS: &[(&str, i32)] = &[
     ("5 - Normale", 5),
     ("7 - Maximum", 7),
     ("9 - Ultra", 9),
-    ("Ultra - Highest (Ultimate)", -1),
 ];
 
 enum WorkerMsg {
@@ -175,7 +174,7 @@ impl BackupApp {
             return;
         }
 
-        let username = std::env::var("USERNAME").unwrap_or_else(|_| "utilisateur".into());
+        let username = username();
         let today = Local::now().format("%Y-%m-%d").to_string();
         let archive_name = format!("Backup-{username}_{today}.7z");
         let dest_path = backup_dir.join(&archive_name);
@@ -555,15 +554,28 @@ impl eframe::App for BackupApp {
 // Utils fichiers / système
 // ════════════════════════════════════════════════════════════════════════════════
 
-fn app_dir() -> PathBuf {
+#[cfg(windows)]
+fn config_path() -> PathBuf {
+    // Windows : config à côté de l'exécutable (comportement historique).
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+        .join(CONFIG_FILE)
 }
 
+#[cfg(not(windows))]
 fn config_path() -> PathBuf {
-    app_dir().join(CONFIG_FILE)
+    // Linux : ~/.config/BackupFolders — macOS : ~/Library/Application Support/BackupFolders
+    let home = std::env::var("HOME").unwrap_or_default();
+    let base = if cfg!(target_os = "macos") {
+        PathBuf::from(&home).join("Library").join("Application Support")
+    } else {
+        std::env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(&home).join(".config"))
+    };
+    base.join("BackupFolders").join(CONFIG_FILE)
 }
 
 fn load_config() -> Config {
@@ -575,40 +587,92 @@ fn load_config() -> Config {
 
 fn save_config(config: &Config) {
     if let Ok(json) = serde_json::to_string_pretty(config) {
-        let _ = std::fs::write(config_path(), json);
+        let path = config_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, json);
     }
 }
 
-/// Résolution de NanaZipC : PATH, puis %LOCALAPPDATA%\Microsoft\WindowsApps\NanaZipC.exe
-fn nanazip_path() -> Option<PathBuf> {
-    if std::process::Command::new("NanaZipC")
-        .arg("--help")
-        .output()
-        .is_ok()
+fn username() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "utilisateur".into())
+}
+
+#[cfg(windows)]
+const SEVENZIP_NAMES: &[&str] = &["NanaZipC", "7z", "7zz"];
+#[cfg(not(windows))]
+const SEVENZIP_NAMES: &[&str] = &["7zz", "7z", "7za", "7zr"];
+
+/// Évite la fenêtre console qui clignote quand l'appli GUI lance un process (Windows).
+fn hide_window(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
     {
-        return Some(PathBuf::from("NanaZipC"));
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    let p = Path::new(&local)
-        .join("Microsoft")
-        .join("WindowsApps")
-        .join("NanaZipC.exe");
-    if p.is_file() {
-        Some(p)
-    } else {
-        None
-    }
+    cmd
 }
 
-/// Équivalent de os.path.splitdrive sur Windows ("C:\foo" -> ("C", "\foo")).
-fn splitdrive(path: &Path) -> (String, PathBuf) {
-    let s = path.to_string_lossy();
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 && bytes[1] == b':' {
-        (s[..1].to_string(), PathBuf::from(&s[2..]))
-    } else {
-        (String::new(), path.to_path_buf())
+#[allow(unused_mut)]
+fn sevenzip_fallbacks() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Ok(l) = std::env::var("LOCALAPPDATA") {
+            v.push(Path::new(&l).join("Microsoft").join("WindowsApps").join("NanaZipC.exe"));
+        }
+        for k in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(p) = std::env::var(k) {
+                v.push(Path::new(&p).join("7-Zip").join("7z.exe"));
+            }
+        }
     }
+    #[cfg(target_os = "macos")]
+    {
+        // Les applis lancées depuis le Finder n'héritent pas du PATH du shell.
+        v.push(PathBuf::from("/opt/homebrew/bin/7zz"));
+        v.push(PathBuf::from("/usr/local/bin/7zz"));
+    }
+    v
+}
+
+/// Cherche un exécutable 7-Zip : PATH, puis emplacements connus.
+fn sevenzip_path() -> Option<PathBuf> {
+    for name in SEVENZIP_NAMES {
+        let mut probe = Command::new(name);
+        probe.arg("--help");
+        if hide_window(&mut probe).output().is_ok() {
+            return Some(PathBuf::from(name));
+        }
+    }
+    sevenzip_fallbacks().into_iter().find(|p| p.is_file())
+}
+
+/// Chemin relatif miroir : "C:\\foo\\bar" -> "C/foo/bar", "/home/x" -> "home/x".
+fn mirror_subpath(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Prefix(p) => {
+                let s: String = p
+                    .as_os_str()
+                    .to_string_lossy()
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect();
+                if !s.is_empty() {
+                    out.push(s);
+                }
+            }
+            Component::Normal(n) => out.push(n),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Supprime un arbre de répertoires en forçant l'écriture sur les fichiers read-only
@@ -660,9 +724,8 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Déplace un fichier de façon sûre, même entre deux lecteurs différents.
-/// `std::fs::rename` échoue avec `os error 17` (ERROR_NOT_SAME_DEVICE) sur Windows
-/// quand la source et la destination sont sur des disques différents.
+/// Déplace un fichier de façon sûre, même entre deux lecteurs/partitions différents.
+/// `std::fs::rename` échoue entre deux disques (Windows : os error 17, Linux/macOS : EXDEV).
 fn move_file(src: &Path, dst: &Path) -> std::io::Result<()> {
     if std::fs::rename(src, dst).is_ok() {
         return Ok(());
@@ -674,7 +737,7 @@ fn move_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 fn build_archive_name() -> String {
-    let username = std::env::var("USERNAME").unwrap_or_else(|_| "utilisateur".into());
+    let username = username();
     let today = Local::now().format("%Y-%m-%d").to_string();
     format!("Backup-{username}_{today}.7z")
 }
@@ -710,10 +773,7 @@ where
     on_status("Copie des fichiers…");
     for (i, folder) in valid_folders.iter().enumerate() {
         let path = Path::new(folder);
-        let (drive, tail) = splitdrive(path);
-        let tail_str = tail.to_string_lossy();
-        let tail_no_sep: &str = tail_str.strip_prefix('\\').unwrap_or(&tail_str);
-        let dest_sub = temp_dir.join(&drive).join(Path::new(tail_no_sep));
+        let dest_sub = temp_dir.join(mirror_subpath(path));
         on_status(&format!(
             "Copie de {}… ({}/{})",
             path.file_name().unwrap_or_default().to_string_lossy(),
@@ -725,35 +785,37 @@ where
         on_progress(60.0 * (i + 1) as f64 / valid_folders.len() as f64);
     }
 
-    // --- Compression NanaZip ---
+    // --- Compression 7z ---
     on_status("Compression en cours…");
     on_log(&format!("  Compression (niveau {compression})…"));
-    let archive_tmp = temp_dir.with_extension("7z"); // temp_dir + ".7z"
+    // temp_dir + ".7z" (with_extension casserait les noms d'utilisateur contenant un point)
+    let archive_tmp = {
+        let mut s = temp_dir.as_os_str().to_owned();
+        s.push(".7z");
+        PathBuf::from(s)
+    };
     // Une archive résiduelle (run précédent échoué) fait échouer 7z : "Cannot open the file as [7z] archive".
     let _ = std::fs::remove_file(&archive_tmp);
-    let use_mmax = compression == -1;
-    let nanazip = nanazip_path()
-        .ok_or_else(|| "NanaZip introuvable. Installez-le depuis le Microsoft Store.".to_string())?;
-    let mut cmd = Command::new(nanazip);
+    let sevenzip = sevenzip_path().ok_or_else(|| {
+        "7-Zip introuvable.\nWindows : NanaZip (Microsoft Store) ou 7-Zip.\nLinux : sudo apt install 7zip (ou p7zip-full).\nmacOS : brew install sevenzip.".to_string()
+    })?;
+    let mut cmd = Command::new(sevenzip);
     cmd.arg("a")
         .arg("-t7z")
         .arg(&archive_tmp)
         .arg("-r")
-        .arg(temp_dir);
-    if use_mmax {
-        cmd.arg("-mmax");
-    } else {
-        cmd.arg(format!("-mx={compression}"));
-    }
-    cmd.arg("-bsp1");
+        .arg(temp_dir)
+        .arg(format!("-mx={compression}"))
+        .arg("-bsp1");
+    hide_window(&mut cmd);
 
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Impossible de lancer NanaZip : {e}"))?;
+        .map_err(|e| format!("Impossible de lancer 7-Zip : {e}"))?;
 
-    let stdout = child.stdout.take().ok_or("Pas de stdout NanaZip")?;
+    let stdout = child.stdout.take().ok_or("Pas de stdout 7-Zip")?;
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(stdout);
     let mut last_pct = -1i32;
@@ -771,7 +833,7 @@ where
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let _ = std::fs::remove_file(&archive_tmp);
-        on_log(&format!("  ERREUR NanaZip : {stderr}"));
+        on_log(&format!("  ERREUR 7-Zip : {stderr}"));
         return Err(format!("Erreur lors de la compression :\n{stderr}"));
     }
     on_progress(95.0);
