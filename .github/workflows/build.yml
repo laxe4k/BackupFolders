@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64,  os: windows-latest,   target: x86_64-pc-windows-msvc,    bin: backupfolders.exe }
+          - { name: linux-x64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  bin: backupfolders }
+          - { name: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, bin: backupfolders }
+          - { name: macos-arm64,  os: macos-latest,     target: aarch64-apple-darwin,      bin: backupfolders }
+          - { name: macos-intel,  os: macos-latest,     target: x86_64-apple-darwin,       bin: backupfolders }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Dépendances Linux
+        if: startsWith(matrix.os, 'ubuntu')
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev
+          libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a ../../../backupfolders-${{ matrix.name }}.zip ${{ matrix.bin }}
+          else
+            tar czf ../../../backupfolders-${{ matrix.name }}.tar.gz ${{ matrix.bin }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backupfolders-${{ matrix.name }}
+          path: backupfolders-${{ matrix.name }}.*
+
+      - name: Publier dans les Releases
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: backupfolders-${{ matrix.name }}.*
